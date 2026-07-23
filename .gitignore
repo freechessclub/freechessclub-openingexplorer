@@ -1,4 +1,5 @@
-/target
-/_db
+target/
 *.pgn
 *.zst
+/*.oe
+_db/
