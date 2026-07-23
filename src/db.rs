@@ -5,6 +5,7 @@ use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamily, ColumnFamilyDescriptor, DB, DBCompressionType,
     MergeOperands, Options, ReadOptions, SliceTransform, WriteBatch,
     properties::{ESTIMATE_NUM_KEYS, OPTIONS_STATISTICS},
+    IteratorMode,
 };
 
 use crate::{
@@ -405,6 +406,12 @@ impl MastersDatabase<'_> {
             db: self,
             batch: WriteBatch::default(),
         }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (Box<[u8]>, Box<[u8]>)> + '_ {
+        self.inner
+            .iterator_cf(self.cf_masters, IteratorMode::Start)
+            .map(|item| item.expect("read db entry"))
     }
 }
 

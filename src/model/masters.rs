@@ -102,13 +102,14 @@ impl IntoResponse for MastersGame {
 
 #[derive(Debug, Default)]
 pub struct MastersGroup {
-    stats: Stats,
-    games: ThinVec<(u16, GameId)>,
+    pub stats: Stats,
+    pub games: ThinVec<(u16, GameId)>,
+    pub last_year: u16,
 }
 
 #[derive(Default, Debug)]
 pub struct MastersEntry {
-    groups: IntMap<RawUciMove, MastersGroup>,
+    pub groups: IntMap<RawUciMove, MastersGroup>,
 }
 
 impl MastersEntry {
@@ -127,6 +128,7 @@ impl MastersEntry {
                 MastersGroup {
                     stats: Stats::new_single(outcome, mover_rating),
                     games: thin_vec![(mover_rating.saturating_add(opponent_rating), id)],
+                    last_year: 0,
                 },
             )]
             .into_iter()
