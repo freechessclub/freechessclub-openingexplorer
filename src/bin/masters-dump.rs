@@ -191,38 +191,36 @@ fn write_pos(
     return;
   }
 
+  let mut record = Vec::new();
+
   // Write shortened key
-  buf.extend_from_slice(&prefix[..config.key_size]);
-
-  let num_moves = entry.groups
-    .values()
-    .filter(|group| group.stats.total() >= 2)
-    .count() as u8;
-
-  buf.put_u8(num_moves);
+  record.extend_from_slice(&prefix[..config.key_size]);
 
   for (uci, group) in &entry.groups {
     if group.stats.total() >= 2 {
-      uci.write(buf);
+      uci.write(&mut record);
 
       if config.include_last_year {
         write_uint(
-          buf,
+          &mut record,
           (base_year - group.last_year) as u64
         );
       }
 
       write_stats(
         &group.stats,
-        buf,
+        &mut record,
         config.include_rating_avg,
       );
     }
   }
 
+  // Write record size then record data
+  write_uint(buf, record.len() as u64);
+  buf.extend_from_slice(&record);
+
   *written_count += 1;
 }
-
 
 fn generate_revision_id() -> u64 {
   SystemTime::now()
@@ -281,5 +279,5 @@ fn extend_entry_from_reader<B: Buf>(
       );
 
     group.last_year = year;
-}
+  }
 }
