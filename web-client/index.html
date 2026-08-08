@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Opening Explorer</title>
+  <style>
+    table th,
+    table td {
+      padding: 0 10px;
+    }
+    th:not(:first-child),
+    td:not(:first-child) {
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+  <h1>Opening Explorer</h1>
+  <pre id="status"></pre>
+  <div id="move-table-container" style="display: none;"></div>
+    <div style="margin-bottom: 0.5rem;">
+      <button id="back-start" style="margin-right: 0.5rem;">&lt;&lt;</button>
+      <button id="back-move">&lt;</button>
+    </div>
+    <table id="move-table">
+      <thead>
+        <tr>
+          <th>Move</th>
+          <th># Games</th>
+          <th>Last Played</th>
+          <th>White</th>
+          <th>Draws</th>
+          <th>Black</th>
+        </tr>
+      </thead>
+      <tbody>
+      </tbody>
+    </table>
+  </div>
+  <script type="module">
+    import { Explorer } from '/src/explorer.ts';
+    import { Chess } from 'chess.js';
+    
+    let explorer = null;
+    const chess = new Chess();
+
+    async function main() {
+      explorer = new Explorer('masters', '/data/masters.oe');
+      const statusEl = document.getElementById('status');
+      try {
+        await explorer.init((status) => {
+          // Progress indicator callback function for downloading the explorer
+          if(status === 'downloading')
+            statusEl.append('Fetching Explorer...\n');
+          else if(status === 'updating')
+            statusEl.append('Updating Explorer...\n');
+          else if(status === 'download-failed')
+            statusEl.append('Explorer fetch failed.\n');
+          else 
+            statusEl.style.display = 'none';
+        });
+      }
+      catch(e) { 
+        console.error(e); 
+        return;
+      }
+
+      statusEl.style.display = 'none';
+
+      const moveTableContainerEl = document.getElementById('move-table-container');      
+      moveTableContainerEl.style.display = 'block';
+
+      const moveTableEl = document.getElementById('move-table');
+      const tbody = moveTableEl.tBodies[0];
+
+      tbody.addEventListener('click', event => {
+        const moveEl = event.target.closest('.move');
+        if(!moveEl)
+          return;
+          
+        chess.move(moveEl.dataset.san);
+        showPosition(chess.fen());  
+      });
+
+      const backStartEl = document.getElementById('back-start');
+      backStartEl.addEventListener('click', event => {
+        chess.reset();
+        showPosition(chess.fen());
+      });
+
+      const backMoveEl = document.getElementById('back-move');
+      backMoveEl.addEventListener('click', event => {
+        chess.undo();
+        showPosition(chess.fen());
+      });
+
+      showPosition(chess.fen());
+    }
+
+    async function showPosition(fen) {
+      const moveTableEl = document.getElementById('move-table');
+      const tbody = moveTableEl.tBodies[0];
+      tbody.innerHTML = '';
+
+      const position = await explorer.findPosition(fen);
+      if(!position && !position.moves)
+        return;
+
+      position.moves.forEach(m => {
+        tbody.insertAdjacentHTML('beforeend', `
+          <tr>
+            <td><a href="javascript:void(0)" class="move" data-san="${m.move.san}">${m.move.san}</a></td>
+            <td>${m.stats.total}</td>
+            <td>${m.lastYear}</td>
+            <td>${(100 * m.stats.white / m.stats.total).toFixed(1)}%</td>
+            <td>${(100 * m.stats.draws / m.stats.total).toFixed(1)}%</td>
+            <td>${(100 * m.stats.black / m.stats.total).toFixed(1)}%</td>
+          </tr>
+        `);
+      });
+    }
+  
+    main();
+</script>
+</body>
+</html>

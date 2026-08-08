@@ -1,0 +1,13 @@
+{
+  "scripts": {
+    "copy-data": "node scripts/copy-data.js",
+    "dev": "npm run copy-data && vite"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "vite": "^7.0.0"
+  },
+  "dependencies": {
+    "chess.js": "^1.4.0"
+  }
+}
