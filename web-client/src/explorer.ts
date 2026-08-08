@@ -74,16 +74,16 @@ export interface ExplorerPosition {
  * Retrieves entries from an .oe (our format) opening explorer file
  */
 export class Explorer {
-  private metadataUrl: string | null = null; 
-  private dataUrl = '/data/masters.oe';    
   private explorerName = 'masters';
+  private dataUrl = '/data/masters.oe';    
+  private dataUrlParts = [`${this.dataUrl}.00`, `${this.dataUrl}.01`, `${this.dataUrl}.02`, `${this.dataUrl}.03`];
+  private metadataUrl: string | null = null; 
   private static readonly idbStorage = new IDBStorage();
   private metadata: ExplorerMetadata; // metadata retrieved from the file's header
-  private abortDownload: AbortController;
+  private _abortDownload: AbortController;
   private initPromise?: Promise<void>;
   private statusCallback?: (status: string) => void;
   private _ready: boolean = false;
-  private updating: boolean = false;
   private cache = new Map<string, ExplorerPosition>(); // LRU cache for individual positions
   private readonly MAX_CACHE_SIZE = 10000;
   private readonly NUM_BUCKETS = 128; // Divide the data in indexedDB into this many data blocks for memory efficient lookup (powers of 2, max 256)
@@ -138,14 +138,21 @@ export class Explorer {
           console.error(e);
         }
         
-        if(!newMetadata || this.metadata.revisionNumber >= newMetadata.revisionNumber) {      
-          this._ready = true;
-          return;
+        if(newMetadata && newMetadata.revisionNumber > this.metadata.revisionNumber) {
+          this.statusCallback?.('updating');
+          this.fetchData(this.dataUrlParts)
+            .then(metadata => {
+              Explorer.idbStorage.deleteByPrefix('explorer', `${this.explorerName}:${this.metadata.revisionNumber}:`);
+              this.metadata = metadata;
+            })
+            .catch(e => {
+              this.statusCallback?.('update-failed');
+            });
         }
-        this.updating = true;
+
+        this._ready = true;
+        return;
       }
-      else
-        this.fetchHeader(`${this.metadataUrl}.00`).catch(console.error); // Cache warming. Keep cache for header in sync with data
 
       /** 
        * Fetch opening explorer file parts 
@@ -153,22 +160,8 @@ export class Explorer {
        * maximum file size (20MB). 
        */
 
-      try {
-        const url = this.dataUrl;
-        this.metadata = await this.fetchData([
-          `${url}.00`,
-          `${url}.01`,
-          `${url}.02`,
-          `${url}.03`
-        ]);
-      }
-      catch(e) {
-        if(this.updating)
-          this.statusCallback?.('update-failed'); // Use the version already in IndexedDB.
-        else
-          throw e;
-      }
-
+      this.statusCallback?.('downloading');
+      this.metadata = await this.fetchData(this.dataUrlParts);
       this._ready = true;
       this.statusCallback?.('ready');
     })().catch(err => {
@@ -256,19 +249,16 @@ export class Explorer {
    * @returns the file's metadata
    */
   private async fetchData(urls: string | string[]): Promise<ExplorerMetadata> {
-    await Explorer.idbStorage.deleteByPrefix('explorer', `${this.explorerName}:`);
-
     const urlList = Array.isArray(urls) ? urls : [urls];
 
-    this.abortDownload = new AbortController();
+    this._abortDownload = new AbortController();
+    let revisionNumber: bigint | null = null;
 
     try {
-      this.statusCallback?.(this.updating ? 'updating' : 'downloading');
-
       const readers = await Promise.all(
         urlList.map(url =>
           fetch(url, { 
-            signal: this.abortDownload!.signal,
+            signal: this._abortDownload!.signal,
             cache: 'no-store'
           }).then(r => {
             if (!r.ok) {
@@ -285,6 +275,7 @@ export class Explorer {
       const streamReader = new ByteStreamReader(readers);
       const header = await streamReader.readBytes(this.HEADER_SIZE);
       const metadata = this.readHeader(new ByteReader(header));
+      revisionNumber = metadata.revisionNumber;
       const numEntries = metadata.numEntries;
 
       // The initial buffer size of the index (lookup table) for each data block stored in indexedDB (will grow if needed).
@@ -315,7 +306,7 @@ export class Explorer {
           if(bucket !== lastBucket) { // Started a new data blcok
             // Save the block and its index to indexedDB
             if(lastBucket !== undefined) 
-              await this.saveBlock(this.explorerName, { blockNum: lastBucket, index: indexWriter.getBytes(), data: dataWriter.getBytes() });
+              await this.saveBlock(this.explorerName, revisionNumber, { blockNum: lastBucket, index: indexWriter.getBytes(), data: dataWriter.getBytes() });
 
             lastBucket = bucket;
             indexWriter = new ByteWriter(indexSize);
@@ -333,18 +324,34 @@ export class Explorer {
           dataWriter.writeBytes(data);
           dataOffset += dataWriter.length - before;
         }
-      } catch (e) {
-        streamReader.close();
+      }
+      catch(e) {
+        if(!(e instanceof EndOfStreamError))
+          throw e;
+
         // Save the final block
-        await this.saveBlock(this.explorerName, { blockNum: lastBucket, index: indexWriter.getBytes(), data: dataWriter.getBytes() });
+        await this.saveBlock(this.explorerName, revisionNumber, {
+          blockNum: lastBucket,
+          index: indexWriter.getBytes(),
+          data: dataWriter.getBytes()
+        });
+
         await this.saveMetadata(this.explorerName, metadata);
-        return metadata; 
+        return metadata;
+      }
+      finally {
+        await streamReader.close();
       }
     } catch (e) {
-      await Explorer.idbStorage.deleteByPrefix('explorer', `${this.explorerName}:`);
-      this.abortDownload?.abort();
+      await Explorer.idbStorage.deleteByPrefix('explorer', `${this.explorerName}:${revisionNumber}:`);
+      this._abortDownload?.abort();
       throw e;
     }
+  }
+
+  /** Allows the app to abort the download of the explorer files externally */
+  public abortDownload() {
+    this._abortDownload?.abort();
   }
 
   /*
@@ -423,7 +430,7 @@ export class Explorer {
   private async findPositionByKey(key: Uint8Array): Promise<ExplorerPosition | undefined> {
     // Get data block from indexedDB
     const bucket = key[0] >> (8 - this.BUCKET_BITS);
-    const block = await this.loadBlock(this.explorerName, bucket);
+    const block = await this.loadBlock(this.explorerName, this.metadata.revisionNumber, bucket);
 
     const indexBytes = block.index;
     const indexEntrySize = this.metadata.keySizeBytes + this.OFFSET_SIZE;
@@ -482,28 +489,28 @@ export class Explorer {
   /**
    * Construct the indexedDB key string from its components
    */
-  private blockKey(databaseName: string, type: string, blockNum: number): string {
-    return `${databaseName}:${type}:${blockNum.toString().padStart(3, '0')}`;
+  private blockKey(databaseName: string, revisionNumber: bigint, type: string, blockNum: number): string {
+    return `${databaseName}:${revisionNumber}:${type}:${blockNum.toString().padStart(3, '0')}`;
   }
 
   /**
    * Save a data block and its index to indexedDB 
    */
-  private async saveBlock(databaseName: string, block: ExplorerBlock): Promise<void> {
+  private async saveBlock(databaseName: string, revisionNumber: bigint, block: ExplorerBlock): Promise<void> {
     await Explorer.idbStorage.putMany('explorer', [
-      [this.blockKey(databaseName, 'index', block.blockNum), new Blob([block.index as BlobPart])],
-      [this.blockKey(databaseName, 'data', block.blockNum), new Blob([block.data as BlobPart])]
+      [this.blockKey(databaseName, revisionNumber, 'index', block.blockNum), new Blob([block.index as BlobPart])],
+      [this.blockKey(databaseName, revisionNumber, 'data', block.blockNum), new Blob([block.data as BlobPart])]
     ]); 
   }
 
   /**
    * Load a data block and its index from indexedDB
    */
-  private async loadBlock(databaseName: string, blockNum: number): Promise<ExplorerBlock> {
+  private async loadBlock(databaseName: string, revisionNumber: bigint, blockNum: number): Promise<ExplorerBlock> {
     const [indexBlob, dataBlob] = await Explorer.idbStorage.getMany<[Blob, Blob]>(
       'explorer', [
-        this.blockKey(databaseName, 'index', blockNum), 
-        this.blockKey(databaseName, 'data', blockNum)
+        this.blockKey(databaseName, revisionNumber, 'index', blockNum), 
+        this.blockKey(databaseName, revisionNumber, 'data', blockNum)
       ]
     );
 
@@ -658,7 +665,7 @@ export class Explorer {
     return {
       from,
       to,
-      ...(piece !== undefined ? { promotion: piece } : {}),
+      ...(piece !== undefined ? { promotion: piece } : {})
     };
   }
 }

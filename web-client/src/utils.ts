@@ -291,7 +291,7 @@ export class ByteStreamReader {
       return value;
 
     if (!(await this.fillBuffer(1)))
-      throw new Error("Unexpected end of stream");
+      throw new EndOfStreamError();
 
     return this.readByteSync()!;
   }
@@ -314,7 +314,7 @@ export class ByteStreamReader {
       return value;
 
     if (!(await this.fillBuffer(count)))
-      throw new Error("Unexpected end of stream");
+      throw new EndOfStreamError();
 
     return this.readBytesSync(count)!;
   }
@@ -333,7 +333,7 @@ export class ByteStreamReader {
 
     while (true) {
       if (!(await this.fillBuffer(1)))
-        throw new Error("Unexpected end of stream");
+        throw new EndOfStreamError();
 
       const value = this.readUintSync();
 
@@ -352,6 +352,13 @@ export class ByteStreamReader {
         // ignore cancellation errors
       }
     }
+  }
+}
+
+export class EndOfStreamError extends Error {
+  constructor() {
+    super('End of stream');
+    this.name = 'EndOfStreamError';
   }
 }
 
