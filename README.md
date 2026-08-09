@@ -92,13 +92,13 @@ npm run dev
 By default, the example web app uses the `masters.oe` file(s) in `/data`. These should be copied to:
 
 ```text
-/web-client/public/data
+web-client/public/data
 ```
 
 Alternatively, you can place your own Explorer file(s) in:
 
 ```text
-/web-client/public/data
+web-client/public/data
 ```
 
 and modify the parameters passed to `Explorer()` in `index.html`.
@@ -108,5 +108,5 @@ and modify the parameters passed to `Explorer()` in `index.html`.
 For details on the `.oe` Explorer file format, see the comments at the top of:
 
 ```text
-/lila-openingexplorer/src/bin/masters-dump.rs
+lila-openingexplorer/src/bin/masters-dump.rs
 ```
