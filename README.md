@@ -89,19 +89,10 @@ npm install
 npm run dev
 ```
 
-By default, the example web app uses the `masters.oe` file(s) in `/data`. These should be copied to:
+By default, the example web app uses the `masters.oe` file(s) in `data`, which are automatically copied to `web-client/public/data`.
 
-```text
-web-client/public/data
-```
+Alternatively, you can place your own data file(s) in `web-client/public/data` and modify the parameters passed to `Explorer()` in `index.html`.
 
-Alternatively, you can place your own Explorer file(s) in:
-
-```text
-web-client/public/data
-```
-
-and modify the parameters passed to `Explorer()` in `index.html`.
 
 ## Explorer File Format
 
