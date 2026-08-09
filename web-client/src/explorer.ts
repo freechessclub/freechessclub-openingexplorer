@@ -127,30 +127,36 @@ export class Explorer {
     this.statusCallback = statusCallback;
 
     this.initPromise = (async () => {
-      /** Check for updates */
       this.metadata = await this.loadMetadata(this.explorerName);
       if(this.metadata) {
-        let newMetadata: ExplorerMetadata | null = null;
-        try {
-          newMetadata = await this.fetchHeader(`${this.metadataUrl}.00`);       
-        }
-        catch(e) {
-          console.error(e);
-        }
-        
-        if(newMetadata && newMetadata.revisionNumber > this.metadata.revisionNumber) {
-          this.statusCallback?.('updating');
-          this.fetchData(this.dataUrlParts)
-            .then(metadata => {
-              Explorer.idbStorage.deleteByPrefix('explorer', `${this.explorerName}:${this.metadata.revisionNumber}:`);
-              this.metadata = metadata;
-            })
-            .catch(e => {
-              this.statusCallback?.('update-failed');
-            });
-        }
-
         this._ready = true;
+        this.statusCallback?.('ready');
+
+        /** Check for updates */
+        this.fetchHeader(`${this.metadataUrl}.00`)
+          .then(newMetadata => {
+            if(newMetadata.revisionNumber <= this.metadata!.revisionNumber)
+              return;
+
+            this.statusCallback?.('updating');
+
+            const oldRevision = this.metadata!.revisionNumber;
+
+            return this.fetchData(this.dataUrlParts)
+              .then(metadata => {
+                Explorer.idbStorage.deleteByPrefix(
+                  'explorer',
+                  `${this.explorerName}:${oldRevision}:`
+                );
+
+                this.metadata = metadata;
+              });
+          })
+          .catch(e => {
+            console.error(e);
+            this.statusCallback?.('update-failed');
+          });
+
         return;
       }
 
