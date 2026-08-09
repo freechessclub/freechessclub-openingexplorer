@@ -64,14 +64,6 @@ For example, to split `masters.oe` into four parts:
 split -n 4 -d masters.oe masters.oe.
 ```
 
-This produces files such as:
-
-```text
-masters.oe.00
-masters.oe.01
-masters.oe.02
-masters.oe.03
-```
 
 ## Web Client
 
