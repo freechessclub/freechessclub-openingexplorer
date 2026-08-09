@@ -67,7 +67,7 @@ split -n 4 -d masters.oe masters.oe.
 
 ## Web Client
 
-The web client consists of a TypeScript class called `Explorer`, which can be used to fetch the Explorer file and retrieve position records from it.
+The web client consists of a TypeScript class called `Explorer`, which can be used to fetch the explorer file and retrieve position records from it.
 
 For memory efficiency, the web client streams the Explorer file(s) and stores them as indexed data blocks in IndexedDB. By default, the file is divided into 128 blocks.
 
