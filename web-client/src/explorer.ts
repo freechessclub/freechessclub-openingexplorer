@@ -74,10 +74,10 @@ export interface ExplorerPosition {
  * Retrieves entries from an .oe (our format) opening explorer file
  */
 export class Explorer {
-  private explorerName = 'masters';
-  private dataUrl = '/data/masters.oe';    
-  private dataUrlParts = [`${this.dataUrl}.00`, `${this.dataUrl}.01`, `${this.dataUrl}.02`, `${this.dataUrl}.03`];
+  private dataUrlPath = '/data/masters.oe';    
+  private dataUrls: string | string[] = [`${this.dataUrlPath}.00`, `${this.dataUrlPath}.01`, `${this.dataUrlPath}.02`, `${this.dataUrlPath}.03`];    
   private metadataUrl: string | null = null; 
+  private explorerName = 'masters';
   private static readonly idbStorage = new IDBStorage();
   private metadata: ExplorerMetadata; // metadata retrieved from the file's header
   private _abortDownload: AbortController;
@@ -102,16 +102,17 @@ export class Explorer {
   private readonly FLAG_RATING_AVG = 1 << 0;
   private readonly FLAG_LAST_YEAR = 1 << 1;
   
-  constructor(explorerName?: string, dataUrl?: string, metadataUrl?: string) {
+  constructor(explorerName?: string, dataUrls?: string | string[], metadataUrl?: string) {
     if(explorerName)
       this.explorerName = explorerName;
-    if(dataUrl)
-      this.dataUrl = dataUrl;
+    if(dataUrls)
+      this.dataUrls = dataUrls;
+
     if(metadataUrl)
       this.metadataUrl = metadataUrl;
 
     if(!this.metadataUrl)
-      this.metadataUrl = this.dataUrl;
+      this.metadataUrl = Array.isArray(this.dataUrls) ? this.dataUrls[0] : this.dataUrls;
   }
 
   /** Is explorer initialised */
@@ -133,7 +134,7 @@ export class Explorer {
         this.statusCallback?.('ready');
 
         /** Check for updates */
-        this.fetchHeader(`${this.metadataUrl}.00`)
+        this.fetchHeader(`${this.metadataUrl}`)
           .then(newMetadata => {
             if(newMetadata.revisionNumber <= this.metadata!.revisionNumber)
               return;
@@ -142,14 +143,10 @@ export class Explorer {
 
             const oldRevision = this.metadata!.revisionNumber;
 
-            return this.fetchData(this.dataUrlParts)
+            return this.fetchData(this.dataUrls)
               .then(metadata => {
-                Explorer.idbStorage.deleteByPrefix(
-                  'explorer',
-                  `${this.explorerName}:${oldRevision}:`
-                );
-
                 this.metadata = metadata;
+                Explorer.idbStorage.deleteByPrefix('explorer', `${this.explorerName}:${oldRevision}:`);
               });
           })
           .catch(e => {
@@ -167,7 +164,7 @@ export class Explorer {
        */
 
       this.statusCallback?.('downloading');
-      this.metadata = await this.fetchData(this.dataUrlParts);
+      this.metadata = await this.fetchData(this.dataUrls);
       this._ready = true;
       this.statusCallback?.('ready');
     })().catch(err => {
@@ -192,15 +189,20 @@ export class Explorer {
 
     if(!response.ok)
       throw new Error(`Failed to load metadata from ${url}`);
-
+  
     const streamReader = new ByteStreamReader([response.body!.getReader()]);
-    const header = await streamReader.readBytes(this.HEADER_SIZE);
-    streamReader.close();
-    const metadata = this.readHeader(new ByteReader(header));
-    if(!metadata)
-      throw new Error(`Invalid opening explorer file: ${url}`);
+    try {
+      const header = await streamReader.readBytes(this.HEADER_SIZE);
+      const metadata = this.readHeader(new ByteReader(header));
 
-    return metadata;
+      if(!metadata)
+        throw new Error(`Invalid opening explorer file: ${url}`);
+
+      return metadata;
+    }
+    finally {
+      await streamReader.close();
+    }
   }
 
   /** 
@@ -294,6 +296,7 @@ export class Explorer {
       let dataOffset: number;
 
       let lastBucket: number;
+      let numRecords = 0;
             
       try {
         while (true) {
@@ -329,11 +332,18 @@ export class Explorer {
           dataWriter.writeUint(data.length);
           dataWriter.writeBytes(data);
           dataOffset += dataWriter.length - before;
+
+          numRecords++;
         }
       }
       catch(e) {
         if(!(e instanceof EndOfStreamError))
           throw e;
+
+        if(numRecords !== metadata.numEntries)
+          throw new Error(
+            `Unexpected end of stream: expected ${metadata.numEntries} records, got ${numRecords}`
+          );
 
         // Save the final block
         await this.saveBlock(this.explorerName, revisionNumber, {
