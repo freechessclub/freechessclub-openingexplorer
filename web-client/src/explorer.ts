@@ -2,7 +2,7 @@
 // Use of this source code is governed by a GPL-style
 // license that can be found in the LICENSE file.
 
-import { IDBStorage, ByteReader, ByteWriter, ByteStreamReader } from './utils';
+import { IDBStorage, ByteReader, ByteWriter, ByteStreamReader, EndOfStreamError } from './utils';
 import { zobrist128 } from './zobrist';
 import { Chess } from 'chess.js';
 import { rookCastlingToStandard } from './chess-helper';
@@ -79,8 +79,8 @@ export class Explorer {
   private metadataUrl: string | null = null; 
   private explorerName = 'masters';
   private static readonly idbStorage = new IDBStorage();
-  private metadata: ExplorerMetadata; // metadata retrieved from the file's header
-  private _abortDownload: AbortController;
+  private metadata!: ExplorerMetadata; // metadata retrieved from the file's header
+  private _abortDownload?: AbortController;
   private initPromise?: Promise<void>;
   private statusCallback?: (status: string) => void;
   private _ready: boolean = false;
@@ -128,8 +128,9 @@ export class Explorer {
     this.statusCallback = statusCallback;
 
     this.initPromise = (async () => {
-      this.metadata = await this.loadMetadata(this.explorerName);
-      if(this.metadata) {
+      const metadata = await this.loadMetadata(this.explorerName);
+      if(metadata) {
+        this.metadata = metadata;
         this._ready = true;
         this.statusCallback?.('ready');
 
@@ -168,7 +169,7 @@ export class Explorer {
       this._ready = true;
       this.statusCallback?.('ready');
     })().catch(err => {
-      this.initPromise = null;
+      this.initPromise = undefined;
       this.statusCallback?.('download-failed');
     });
 
@@ -210,33 +211,33 @@ export class Explorer {
    */ 
   private readHeader(reader: ByteReader): ExplorerMetadata {
     // 4-byte magic number
-    const magicBytes = reader.readBytes(this.MAGIC_NUMBER_SIZE);
+    const magicBytes = reader.readBytes(this.MAGIC_NUMBER_SIZE)!;
     const magicNumber = String.fromCharCode(...magicBytes);
     if(magicNumber !== this.MAGIC_NUMBER) 
       throw new Error('Not an opening explorer file.');
 
     // 2-byte format version
-    const formatVersion = reader.readUint(this.FORMAT_VERSION_SIZE);
+    const formatVersion = reader.readUint(this.FORMAT_VERSION_SIZE)!;
     if(formatVersion !== 1) 
       throw new Error('Unsupported opening explorer file format.');
 
     // 2-byte flags
-    const flags = reader.readUint(this.FLAGS_SIZE);
+    const flags = reader.readUint(this.FLAGS_SIZE)!;
 
     const includeRatingAvg = (flags & this.FLAG_RATING_AVG) !== 0;
     const includeLastYear = (flags & this.FLAG_LAST_YEAR) !== 0;
 
     // 1-byte key size 
-    const keySizeBytes = reader.readUint(this.KEY_SIZE_BYTES_SIZE);
+    const keySizeBytes = reader.readUint(this.KEY_SIZE_BYTES_SIZE)!;
 
     // 8-byte revision number
-    const revisionNumber = reader.readBigUint64();
+    const revisionNumber = reader.readBigUint64()!;
 
     // 4-byte Number of entries
-    const numEntries = reader.readUint(this.NUM_ENTRIES_SIZE);
+    const numEntries = reader.readUint(this.NUM_ENTRIES_SIZE)!;
 
     // 2-byte base year
-    const baseYear = reader.readUint(this.BASE_YEAR_SIZE);
+    const baseYear = reader.readUint(this.BASE_YEAR_SIZE)!;
 
     return {
       magicNumber,
@@ -258,15 +259,15 @@ export class Explorer {
    */
   private async fetchData(urls: string | string[]): Promise<ExplorerMetadata> {
     const urlList = Array.isArray(urls) ? urls : [urls];
-
-    this._abortDownload = new AbortController();
+    const abortController = new AbortController();
+    this._abortDownload = abortController;
     let revisionNumber: bigint | null = null;
 
     try {
       const readers = await Promise.all(
         urlList.map(url =>
           fetch(url, { 
-            signal: this._abortDownload!.signal,
+            signal: abortController.signal,
             cache: 'no-store'
           }).then(r => {
             if (!r.ok) {
@@ -288,14 +289,14 @@ export class Explorer {
 
       // The initial buffer size of the index (lookup table) for each data block stored in indexedDB (will grow if needed).
       const indexSize = Math.ceil(1.1 * numEntries * (metadata.keySizeBytes + this.OFFSET_SIZE) / this.NUM_BUCKETS);
-      let indexWriter: ByteWriter;
+      let indexWriter!: ByteWriter;
 
       // The initial buffer size of each data block stored in indexedDB (will grow if needed).
       const dataSize = Math.ceil(10 * numEntries / this.NUM_BUCKETS);
-      let dataWriter: ByteWriter;
-      let dataOffset: number;
+      let dataWriter!: ByteWriter;
+      let dataOffset!: number;
 
-      let lastBucket: number;
+      let lastBucket: number | undefined;
       let numRecords = 0;
             
       try {
@@ -312,7 +313,7 @@ export class Explorer {
           // Assign the record to a data block
           const bucket = key[0] >> (8 - this.BUCKET_BITS);   
 
-          if(bucket !== lastBucket) { // Started a new data blcok
+          if(bucket !== lastBucket) { // Started a new data block
             // Save the block and its index to indexedDB
             if(lastBucket !== undefined) 
               await this.saveBlock(this.explorerName, revisionNumber, { blockNum: lastBucket, index: indexWriter.getBytes(), data: dataWriter.getBytes() });
@@ -344,6 +345,9 @@ export class Explorer {
           throw new Error(
             `Unexpected end of stream: expected ${metadata.numEntries} records, got ${numRecords}`
           );
+
+        if(lastBucket === undefined)
+          throw new Error('Opening explorer contains no records');
 
         // Save the final block
         await this.saveBlock(this.explorerName, revisionNumber, {
@@ -540,7 +544,7 @@ export class Explorer {
   /**
    * Load the explorer's metadata 
    */
-  private async loadMetadata(databaseName: string): Promise<ExplorerMetadata> {
+  private async loadMetadata(databaseName: string): Promise<ExplorerMetadata | undefined> {
     try {
       return await Explorer.idbStorage.get<ExplorerMetadata>(
         'explorer',
@@ -568,13 +572,13 @@ export class Explorer {
    * Read and parse a position's moves from the data buffer
    */
   private readMoves(reader: ByteReader, metadata: ExplorerMetadata): ExplorerMove[] {
-    const payloadSize = reader.readUint();
+    const payloadSize = reader.readUint()!;
     const endOffset = reader.position + payloadSize;
     const moves: ExplorerMove[] = [];
     while(reader.position < endOffset) {
       const move = this.readUCIMove(reader);
 
-      let lastYear: number;
+      let lastYear: number | undefined;
       if(metadata.includeLastYear) 
         lastYear = this.readLastYear(reader, metadata);
 
@@ -598,13 +602,13 @@ export class Explorer {
   private readStats(reader: ByteReader, metadata: ExplorerMetadata): ExplorerStats {
     let value = null;
     let white = 0, black = 0, draws = 0;
-    let ratingAvg: number;
+    let ratingAvg: number | undefined;
 
     if(metadata.includeRatingAvg) 
       ratingAvg = reader.readUint();
 
     // first stats value (compressed cases)
-    const first = reader.readUint();
+    const first = reader.readUint()!;
 
     if(first <= 5) {
       const special = [
@@ -621,8 +625,8 @@ export class Explorer {
     else {
       // normal case:
       white = first - 6;
-      draws = reader.readUint();
-      black = reader.readUint();  
+      draws = reader.readUint()!;
+      black = reader.readUint()!;  
     }
 
     const total = white + draws + black;
@@ -640,7 +644,7 @@ export class Explorer {
    * Parse a move's "last year played" from the data buffer 
    */
   private readLastYear(reader: ByteReader, metadata: ExplorerMetadata): number {
-    return metadata.baseYear - reader.readUint(); // the year is encoded relative to baseYear
+    return metadata.baseYear - reader.readUint()!; // the year is encoded relative to baseYear
   }
 
   /**
@@ -666,7 +670,7 @@ export class Explorer {
       }
     }
 
-    const packed = reader.readUint(this.UCI_MOVE_SIZE);
+    const packed = reader.readUint(this.UCI_MOVE_SIZE)!;
 
     let from = squareToString(packed & 63);
     let to = squareToString((packed >> 6) & 63);
