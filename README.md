@@ -45,7 +45,7 @@ cargo run --bin masters-dump --release -- --output masters.oe
 | `--output <OUTPUT>`     | Output file name                                  | `masters.oe`       |
 | `--key-size <KEY_SIZE>` | Size of the truncated Zobrist hash in bytes       | `8` (maximum `12`) |
 | `--include-rating-avg`  | Include the average rating for each move          | Not included       |
-| `--no-last-year`        | Do not include the last year played for each move | Included           |
+| `--no-last-year`        | Do not include the last year played for each move | Last Year Included |
 
 For example:
 
