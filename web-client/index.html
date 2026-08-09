@@ -53,11 +53,13 @@
           // Progress indicator callback function for downloading the explorer
           if(status === 'downloading')
             statusEl.append('Fetching Explorer...\n');
-          else if(status === 'updating')
-            statusEl.append('Updating Explorer...\n');
           else if(status === 'download-failed')
             statusEl.append('Explorer fetch failed.\n');
-          else 
+          else if(status === 'updating')
+            console.log('Updating Explorer...');
+          else if(status === 'update-failed')
+            console.error('Failed to update explorer.');
+          else if(status === 'ready')
             statusEl.style.display = 'none';
         });
       }
