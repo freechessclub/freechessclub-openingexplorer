@@ -2,9 +2,11 @@
 
 A tool for creating a chess opening explorer file from a PGN file, along with a web client for importing and retrieving entries from that file. 
 
+> Used by [Free Chess Club](http://freechess.org/play) · [GitHub repository](https://github.com/FreeChessClub/freechessclub-app)
+
 The export tool is a fork of Lichess' **lila-openingexplorer** database server, with an additional Rust binary, `masters-dump.rs`, for generating the explorer file.
 
-> Used by [Free Chess Club](http://freechess.org/play) · [GitHub repository](https://github.com/FreeChessClub/freechessclub-app)
+The web-client is a typescript module for retrieving positions from the explorer file.
 
 ## Creating an Explorer File
 
