@@ -20,13 +20,18 @@
 //! varints are stored as ULEB128
 //! Records are sorted by the record key in lexicographical byte ordering
 //! The record key is a truncated zobrist128 hash of the position fen, 8 bytes by default.
+//! For more details on how the zobrist hash is encoded see src/zobrist.rs or zobrist.ts in 
+//! the example web-client.
 //! Move data for each move is in the form:
 //! [uci move:2 bytes][last year played (offset)?:varint][average rating?:varint]
 //! [white wins + 6:varint][draws:varint][black wins:varint] 
 //! uci move is encoded as follows:
 //! [from square:bits 0-5][to square:bits 6-11][promotion piece:bits 12-15]
 //! square: 0 = a1, 1 = b1, ..., 63 = h8
-//! promotion (or piece placement): 0 = none (or pawn), 1 = knight, 2 = bishop, 3 = rook, 4 = queen, 5 = king 
+//! promotion: 0 = none (or pawn), 1 = knight, 2 = bishop, 3 = rook, 4 = queen, 5 = king 
+//! Castling moves are encoded using rook-castling notation, e.g. O-O is encoded as e1h1 not e1g1
+//! For crazyhouse/bughouse piece placements, from square = to square, and promotion piece contains 
+//! the placed piece
 //! Last year played is relative to base_year in the metadata which is the year the 
 //! file was exported, e.g. if base_year is 2026 then 2023 is encoded as 3. 
 //! For the white/draws/black stats. There is compressed form when number of games played = 2. In that
