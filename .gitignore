@@ -1,4 +1,11 @@
-/target
-/_db
+target/
 *.pgn
 *.zst
+*.oe
+*.oe.*
+!data/*.oe.*
+_db/
+venv/
+node_modules/
+public/
+
